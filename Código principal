@@ -1,0 +1,249 @@
+//Universidad del Valle de Guatemala 
+//Electrónica Digital 2
+//Julio Pérez, Rodrigo Cabrera y José García. 
+//Laboratorio 4
+//Librerías utilizadas en el circuito. 
+#include <Arduino.h>
+#include "driver/ledc.h"
+
+// Definición de canales PWM
+#define canalPWM 9
+#define canalPWM_R 10
+#define canalPWM_V 11
+#define canalPWM_A 12
+
+// Frecuencia en Hz
+#define freqPWM 50
+#define freqPWMLED 50
+
+// Resolución del duty cycle en bits
+#define resPWM 10
+#define resPWMLED 10
+//Definición de pin de PWM para el servo
+#define pinPWM1 2
+//Definición de los pines de los LEDs utilizados como pines PWM para la parte del cambio de LEDs
+#define BTN1 4
+#define BTN2 5
+#define BTN3 18
+#define BTN4 19
+
+//Definición de valores de PWM para el Servo
+#define PWM_min 26
+#define PWM_max 128
+#define incremento 10
+
+// Definiciones de valores PWM para los LEDs
+#define PWM_minLed 0
+#define PWM_maxLed 250
+#define incrementoLED 25
+
+// Definición de los pines para los LEDs
+#define LEDR 12
+#define LEDV 13
+#define LEDA 14
+
+int valorPWM = PWM_min;
+int valorPWM2 = PWM_minLed;
+
+//Definición de variables booleanas para las señales de los botones de incremento y decremento de ángulo y de intensidad de las LEDs
+volatile bool aumentarPWM = false;
+volatile bool disminuirPWM = false;
+volatile bool aumentarLED = false;
+
+int currentfunction = 0; // Variable para controlar el LED actual
+bool ledActive = false;  // Indica si el LED está encendido o apagado
+
+unsigned long lastDebounceTime = 0;  // Último tiempo cuando se detectó un cambio en el botón
+unsigned long debounceDelay = 50;    // Tiempo de debounce en milisegundos
+bool lastButtonState = HIGH;         // Último estado conocido del botón
+bool buttonState = HIGH;             // Estado actual del botón
+bool buttonPressed = false;          // Indica si el botón fue presionado
+
+// Funciones ISR para los botones
+void IRAM_ATTR onButton1Press() {
+    aumentarPWM = true;
+}
+
+void IRAM_ATTR onButton2Press() {
+    disminuirPWM = true;
+}
+
+void IRAM_ATTR onButton4Press() {
+    aumentarLED = true;
+}
+
+void initPWM(void);
+void initPWMLEDs(void);
+void buttons(void);
+void changeLED(void);
+void updateLEDIntensity(void);
+
+void setup() {
+    Serial.begin(115200); // Inicializa el monitor serial
+    initPWM();
+    initPWMLEDs(); // Inicializa todos los LEDs
+    buttons();
+}
+
+void loop() {
+    // Manejo de la intensidad del PWM
+    if (aumentarPWM) {
+        aumentarPWM = false;
+        if (valorPWM < PWM_max) {
+            valorPWM += incremento;
+            if (valorPWM > PWM_max) {
+                valorPWM = PWM_max;
+            }
+            ledcWrite(canalPWM, valorPWM);
+            delay(10);
+        }
+    }
+    if (disminuirPWM) {
+        disminuirPWM = false;
+        if (valorPWM > PWM_min) {
+            valorPWM -= incremento;
+            if (valorPWM < PWM_min) {
+                valorPWM = PWM_min;
+            }
+            ledcWrite(canalPWM, valorPWM);
+            delay(10);
+        }
+    }
+
+    // Manejo del cambio de LEDs
+    buttonState = digitalRead(BTN3);
+    if (buttonState != lastButtonState) {
+        lastDebounceTime = millis();  // Restablece el temporizador de debounce
+    }
+
+    if ((millis() - lastDebounceTime) > debounceDelay) {
+        if (buttonState == LOW && !buttonPressed) {
+            buttonPressed = true;  // Indica que el botón ha sido presionado
+            changeLED();
+        }
+    } else {
+        buttonPressed = false;  // Permite el siguiente cambio cuando el botón es liberado
+    }
+
+    lastButtonState = buttonState;
+
+    // Manejo del aumento de la intensidad del LED
+    if (aumentarLED) {
+        aumentarLED = false;
+        if (valorPWM2 < PWM_maxLed) {
+            valorPWM2 += incrementoLED;
+            if (valorPWM2 >= PWM_maxLed) {
+                valorPWM2 = PWM_minLed;
+                ledActive = false;  // Marca el LED como apagado
+                updateLEDIntensity(); // Apaga el LED
+            } else {
+                ledActive = true; // Marca el LED como encendido
+                updateLEDIntensity(); // Actualiza la intensidad del LED
+            }
+        }
+    }
+
+    // Actualiza los LEDs basados en la posición del servo si la función actual es 3
+    if (currentfunction == 3) {
+        updateLEDIntensity();
+    }
+
+    delay(10);  // Pequeño retardo para evitar sobrecargar el bucle
+}
+
+void initPWM(void) {
+    ledcSetup(canalPWM, freqPWM, resPWM);
+    ledcAttachPin(pinPWM1, canalPWM);
+    ledcWrite(canalPWM, 0);
+}
+
+void initPWMLEDs(void) {
+    // Configura todos los LEDs con sus canales PWM
+    ledcSetup(canalPWM_R, freqPWMLED, resPWMLED);
+    ledcAttachPin(LEDR, canalPWM_R);
+    ledcWrite(canalPWM_R, 0);
+
+    ledcSetup(canalPWM_V, freqPWMLED, resPWMLED);
+    ledcAttachPin(LEDV, canalPWM_V);
+    ledcWrite(canalPWM_V, 0);
+
+    ledcSetup(canalPWM_A, freqPWMLED, resPWMLED);
+    ledcAttachPin(LEDA, canalPWM_A);
+    ledcWrite(canalPWM_A, 0);
+}
+
+void buttons(void) {
+    pinMode(BTN1, INPUT_PULLUP);
+    pinMode(BTN2, INPUT_PULLUP);
+    pinMode(BTN3, INPUT_PULLUP);
+    pinMode(BTN4, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(BTN1), onButton1Press, FALLING);
+    attachInterrupt(digitalPinToInterrupt(BTN2), onButton2Press, FALLING);
+    attachInterrupt(digitalPinToInterrupt(BTN4), onButton4Press, FALLING);
+}
+
+void changeLED() {
+    // Apaga todos los LEDs
+    ledcWrite(canalPWM_R, 0); // LED rojo
+    ledcWrite(canalPWM_V, 0); // LED verde
+    ledcWrite(canalPWM_A, 0); // LED azul
+
+    // Cambia el LED actual
+    switch (currentfunction) {
+        case 0:
+            currentfunction = 1;
+            valorPWM2 = PWM_minLed; // Resetea la intensidad a cero
+            ledcWrite(canalPWM_V, valorPWM2); // Enciende LED verde
+            break;
+        case 1:
+            currentfunction = 2;
+            valorPWM2 = PWM_minLed; // Resetea la intensidad a cero
+            ledcWrite(canalPWM_A, valorPWM2); // Enciende LED azul
+            break;
+        case 2:
+            currentfunction = 3;
+            valorPWM2 = PWM_minLed; // Resetea la intensidad a cero
+            ledcWrite(canalPWM_R, valorPWM2); // Enciende LED rojo
+            break;
+        case 3:
+            currentfunction = 4;
+            valorPWM2 = PWM_minLed; // Resetea la intensidad a cero
+            break;
+        case 4:
+            currentfunction = 0;
+            valorPWM2 = PWM_minLed; // Resetea la intensidad a cero
+            break;
+    }
+    ledActive = false; // Inicialmente apaga el LED cuando cambias
+}
+
+void updateLEDIntensity() {
+    // Actualiza la intensidad del LED actual
+    switch (currentfunction) {
+        case 0:
+            ledcWrite(canalPWM_R, valorPWM2); // Actualiza LED rojo
+            break;
+        case 1:
+            ledcWrite(canalPWM_V, valorPWM2); // Actualiza LED verde
+            break;
+        case 2:
+            ledcWrite(canalPWM_A, valorPWM2); // Actualiza LED azul
+            break;
+        case 3:
+            // Actualiza los LEDs basado en el valor del PWM del servo
+            if (valorPWM >= 26 && valorPWM <= 60) {
+                ledcWrite(canalPWM_A, PWM_maxLed); // Encender LED azul
+                ledcWrite(canalPWM_V, 0); // Apagar LED verde
+                ledcWrite(canalPWM_R, 0); // Apagar LED rojo
+            } else if (valorPWM > 60 && valorPWM <= 90) {
+                ledcWrite(canalPWM_V, PWM_maxLed); // Encender LED verde
+                ledcWrite(canalPWM_A, 0); // Apagar LED azul
+                ledcWrite(canalPWM_R, 0); // Apagar LED rojo
+            } else {
+                ledcWrite(canalPWM_R, PWM_maxLed); // Encender LED rojo
+                ledcWrite(canalPWM_A, 0); // Apagar LED azul
+                ledcWrite(canalPWM_V, 0); // Apagar LED verde
+            }
+            break;
+    }
+}
